@@ -1,0 +1,132 @@
+#include <Arduino.h>
+#include <DFRobotDFPlayerMini.h>
+#include <BluetoothSerial.h>
+
+#define PAUSE 13
+#define PREV 12
+#define NEXT 14
+#define INITIALVALUE 0
+
+DFRobotDFPlayerMini myDFPlayer;
+BluetoothSerial SerialBT;
+int EQ_State = DFPLAYER_EQ_NORMAL;
+int64_t indexTime = INITIALVALUE;
+
+enum DF_PUSH {WAITING_PUSH,PLAYING_PUSH,PAUSE_PUSH,NEXT_PUSH,PREV_PUSH};
+enum DF_STATE {PLAYING_STATE,PAUSE_STATE};
+
+DF_STATE state;
+DF_PUSH push;
+
+
+bool ableToPush = true;
+
+void handleNext(){
+  push = PAUSE_PUSH;
+}
+void handlePrev(){
+  push = PREV_PUSH;
+}
+void handlePause(){
+  push = NEXT_PUSH;
+}
+
+void setup() {
+  Serial2.begin(9600);
+  Serial.begin(9600);
+  SerialBT.begin("ESP32");
+
+  pinMode(PAUSE,INPUT_PULLUP);
+  pinMode(PREV,INPUT_PULLUP);
+  pinMode(NEXT,INPUT_PULLUP);
+
+  attachInterrupt(PAUSE,handlePause,FALLING);
+  attachInterrupt(PREV,handleNext,FALLING);
+  attachInterrupt(NEXT,handlePrev,FALLING);
+
+  Serial.println();
+  Serial.println("Preparing to connect to DFPlayer Mini");
+  delay(1000);
+
+  if(!myDFPlayer.begin(Serial2)){
+    Serial.println("Failed to connect to DFPlayer Mini");
+    while(true);
+  }
+  Serial.println("Success to connect to DFPlayer Mini");
+  myDFPlayer.setTimeOut(500);
+  myDFPlayer.enableLoopAll();
+  myDFPlayer.EQ(DFPLAYER_EQ_NORMAL);
+  myDFPlayer.outputDevice(DFPLAYER_DEVICE_SD);
+}
+
+
+void loop() {
+  if(!ableToPush){
+  push = WAITING_PUSH;
+    if(millis() - indexTime >= 500){
+      ableToPush = true;
+    }
+  }
+  if(push == PAUSE_PUSH && ableToPush){
+    ableToPush = false;
+    indexTime = millis();
+    push = WAITING_PUSH;
+    if(state == PLAYING_STATE){
+      state = PAUSE_STATE;
+      myDFPlayer.pause();
+    }
+    else{
+      state = PLAYING_STATE;
+      myDFPlayer.start();
+    }
+  }
+  if(push == NEXT_PUSH && ableToPush){
+    ableToPush = false;
+    indexTime = millis();
+    push = WAITING_PUSH;
+    myDFPlayer.next();
+  }
+  if(push == PREV_PUSH && ableToPush){
+    ableToPush = false;
+    indexTime = millis();
+    push = WAITING_PUSH;
+    myDFPlayer.previous();
+  }
+
+  if(SerialBT.available()){
+    char value = SerialBT.read();
+    if(value=='R'){
+      myDFPlayer.next();
+    }
+    else if(value=='L'){
+      myDFPlayer.previous();
+    }
+    else if(value=='P'){
+      if(state == PLAYING_STATE){
+        state = PAUSE_STATE;
+        myDFPlayer.pause();
+      }
+      else if(state == PAUSE_STATE){
+        state = PLAYING_STATE;
+        myDFPlayer.start();
+      }
+    }
+    else if(value=='A'){
+      int i = 0;
+      char volumn[5];
+      while(SerialBT.available()){
+        volumn[i++] = SerialBT.read();
+      }
+      volumn[i-1] = '\0';
+      myDFPlayer.volume(atoi(volumn));
+    }
+    else if(value=='E'){
+      EQ_State ++;
+      if(EQ_State>5){
+        EQ_State = 0;
+      }
+      myDFPlayer.EQ(EQ_State);
+    }
+  }
+}
+
